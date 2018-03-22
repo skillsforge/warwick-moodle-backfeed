@@ -1,0 +1,15 @@
+{
+  "name": "skillsforge-warwick-moodle-backfeed",
+  "version": "1.0.0",
+  "description": "Integration between SkillsForge and Moodle",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Alex Williams <***REMOVED***> (***REMOVED***)",
+  "license": "ISC",
+  "dependencies": {
+    "node-fetch": "^2.1.1",
+    "node-persist": "^2.1.0"
+  }
+}
