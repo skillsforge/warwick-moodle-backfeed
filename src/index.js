@@ -2,10 +2,9 @@ const fetch = require('node-fetch');
 const storage = require('node-persist');
 const readLine = require('readline');
 
-storage.initSync({dir: 'persistence/'});
-
 //const mTokDef = '***REMOVED***';
 
+const staging = true;
 const sfHostDef = 'warwick.dev.skillsforge.co.uk';
 const mHostDef = 'moodle-staging.warwick.ac.uk';
 const sfPathA = '/warwick/api/eventManager/unprocessedSessions/Online%20Moodle%20Course';
@@ -46,6 +45,9 @@ async function getConfig() {
 }
 
 function getUnprocessedSessions(sfHost, sfToken) {
+  if (staging) {
+    return fakeSFQuery();
+  }
   return fetch(`https://${sfHost}${sfPathA}`, {method: 'GET', headers: {'X-Auth-Token': sfToken}})
       .then(data => {
         if (data.status !== 200) {
@@ -67,111 +69,126 @@ const getMoodleId = function(adminNotes) {
   return adminNotes.replace('moodle_id = ', '');
 };
 
-async function mainProgram() {
-  const errors = [];
-  try {
+async function mainProgram(errors) {
+  /** @type {{sfHost:string, mHost:string, sfToken:string, mToken:string}} */
+  const config = await getConfig();
+  console.info(`(*) SF Host:\t\t${config.sfHost}\n(*) Moodle Host:\t${config.mHost}\n`);
 
-    const config = await getConfig();
-    console.log(`(*) SF Host:\t\t${config.sfHost}\n(*) Moodle Host:\t${config.mHost}\n`);
+  const moodleIdsFromConfig = await storage.getItem('moodleIds');
+  /** @typedef {{lastQuery:date}} MoodleStorage */
+  /** @type {{MoodleStorage}} */
+  const moodleIds = (typeof moodleIdsFromConfig === 'undefined') ? {} : moodleIdsFromConfig;
 
-    const moodleIdsFromConfig = storage.getItemSync('moodleIds');
-    const moodleIds = (typeof moodleIdsFromConfig === 'undefined') ? {} : moodleIdsFromConfig;
+  /** @typedef {{id:string, eventCode:string, title:string, sessionNumber:number, startDate:string,
+  *               startEpoch:number,adminNotes:?string}} Session */
+  /** @type{Array<Session>} */
+  const sessions = await getUnprocessedSessions(config['sfHost'], config['sfToken']);
 
-    /*
-        const sessions = await getUnprocessedSessions(config['sfHost'], config['sfToken']);
-    */
-    const sessions = fakeSFQuery();
+  console.log(`Processing ${sessions.length} session(s):`);
 
-    console.log(`Processing ${sessions.length} session(s):`);
-    const pmAllSessions = sessions.map(async session => {
-      try {
-        // Moodle course ID
-        const moodleId = getMoodleId(session.adminNotes);
-        if (typeof moodleId === 'undefined') {
-          errors.push(`Session ${session.sessionNumber} for event ${session.eventCode} ` +
-                      `(${session.title}) has a malformed Moodle ID.`);
-          return {session: session};
-        }
-
-        // Time this program last queried Moodle about this course
-        if (!moodleId.hasOwnProperty(moodleId)) {
-          moodleIds[moodleId] = {lastQuery: new Date(0)};
-        }
-        const lastRead = moodleIds[moodleId].lastQuery;
-        const lastReadEpoch = (lastRead).getTime();
-
-        console.log(
-            ` - Session ${session.sessionNumber} for "${session.eventCode}" ` +
-            `(with Moodle ID "${moodleId}") was last read on epoch ${lastRead} (${lastReadEpoch})`);
-
-        /*
-                const users = await getMoodleCourseCompletion(config.mHost, config.mToken, moodleId,
-                                                              lastReadEpoch);
-        */
-        const users = fakeMoodleQuery();
-        return {session: session, moodleId: moodleId, users: users};
-      } catch (e) {
-        errors.push(`Session ${session.id} encountered an unexpected problem: ${e}`);
-        return {session: session};
+  /** @typedef {{session:Session, moodleId:?string, lastRead:?date, lastReadEpoch:?number}} SfData */
+  /** @type {Array<SfData>} */
+  const sessionsWithMoodleIdsAndLastRead = sessions.map(session => {
+    const moodleId = getMoodleId(session.adminNotes);
+    if (typeof moodleId === 'undefined') {
+      errors.push(`Session ${session.sessionNumber} for event ${session.eventCode} ` +
+                  `(${session.title}) has a malformed Moodle ID.`);
+      return {session, moodleId: null, lastRead: null, lastReadEpoch: null};
+    } else {
+      if (!moodleIds.hasOwnProperty(session.id)) {
+        moodleIds[session.id] = {lastQuery: new Date(0)};
       }
-    });
+      const lastRead = moodleIds[session.id].lastQuery;
+      const lastReadEpoch = (lastRead).getTime();
 
-    Promise.all(pmAllSessions)
-           .then(courses => {
-             const sessionUsers = {};
-
-             courses.forEach(course => {
-               if (!course.hasOwnProperty('users') || course.users.length === 0) {
-                 if (course.hasOwnProperty('moodleId')) {
-                   moodleIds[course.moodleId].lastQuery = new Date();
-                 }
-                 return;
-               }
-
-               if (!sessionUsers.hasOwnProperty(course.session.id)) {
-                 sessionUsers[course.session.id] = [];
-               }
-               course.users.forEach(user => {
-                 sessionUsers[course.session.id].push(user.idnumber.toLowerCase());
-               });
-             });
-
-             return sessionUsers;
-           })
-           .then(sessionUsers => fetch(`https://${config.sfHost}/${sfPathB}`, {
-             headers: {'X-Auth-Token': config.sfToken, 'Content-Type': 'application/json'},
-             method: 'POST',
-             body: {newAttendanceType: 'ATTENDED', usersOfSessions: sessionUsers}
-           }))
-           .then(data => {
-             if (data.status !== 200) {
-               return Promise.reject(`Could not submit attendance update: ${data.statusText}`);
-             }
-             return data.json();
-           })
-           .then(json => {
-             if (json.success !== true) {
-               return Promise.reject(`API Error: ${json.errorMessage}`);
-             }
-             console.log(`Updated ${json.data} registration(s)`);
-             return json.data;
-           })
-           .catch(reason => { throw new Error(reason);});
-
-  } catch (e) {
-    console.log('odear: ' + e);
-  } finally {
-    if (errors.length > 0) {
-      console.log('Errors to Report:');
-      errors.forEach(e => console.log(' - ' + e));
+      console.log(
+          ` - Session ${session.sessionNumber} for "${session.eventCode}" ` +
+          `(with Moodle ID "${moodleId}") was last read on epoch ${lastRead} (${lastReadEpoch})`);
+      return {session, moodleId, lastRead, lastReadEpoch};
     }
+  });
+
+  /** @typedef {{userid:number, timecompleted:number, idnumber:string}} MoodleCompletion */
+  /** @type {Array<{sfData:SfData, users:?Array<MoodleCompletion>}>} */
+  const completions = [];
+  for (let index = 0; index < sessionsWithMoodleIdsAndLastRead.length; index++) {
+    const obj = sessionsWithMoodleIdsAndLastRead[index];
+    if (obj.moodleId === null) {
+      continue;
+    }
+
+    let users;
+    try {
+      users = await getMoodleCourseCompletion(config.mHost, config.mToken, obj.moodleId,
+                                              obj.lastReadEpoch);
+    } catch (e) {
+      errors.push(`Session ${obj.session.sessionNumber} for event ${obj.session.eventCode} ` +
+                  `(${obj.session.title}, Moodle ID ${obj.moodleId}) could not be located in ` +
+                  `moodle: ` + e);
+    }
+    completions.push({sfData: obj, users: users});
   }
+
+  const sessionUsers = {};
+  for (let index = 0; index < completions.length; index++) {
+    const /** @type {{sfData:SfData, users:?Array<MoodleCompletion>}} */ su = completions[index];
+    if (su.users.length === 0) {
+      // Only set last query date when ALL fetches are successful - if there are no users, there is
+      // no further need for fetches, and so this is complete.
+      moodleIds[su.sfData.session.id].lastQuery = new Date();
+      continue;
+    }
+    sessionUsers[su.sfData.session.id] = su.users.map(user => user.idnumber.toLowerCase());
+  }
+
+  console.log('Submitting new attendance records to SkillsForge...');
+  console.debug(sessionUsers);
+  let data;
+  try {
+    data = await fetch(`https://${config.sfHost}/${sfPathB}`, {
+      headers: {'X-Auth-Token': config.sfToken, 'Content-Type': 'application/json'},
+      method: 'POST',
+      body: {newAttendanceType: 'ATTENDED', usersOfSessions: sessionUsers}
+    });
+  } catch (e) {
+    errors.push(`Could not submit attendance update: await Fetch failed: ` + e);
+    return;
+  }
+
+  if (data.status !== 200) {
+    errors.push(`Could not submit attendance update: ${data.statusText}`);
+    return;
+  }
+  const json = data.json();
+  if (json.success !== true) {
+    errors.push(`SkillsForge API Error: ${json.errorMessage}`);
+    return;
+  }
+  console.log(`Updated ${json.data} registration(s).`);
+  for (const sessionId in sessionUsers) {
+    if (!sessionUsers.hasOwnProperty(sessionId)) {continue;}
+    moodleIds[sessionId].lastQuery = new Date();
+  }
+  await storage.putItem('moodleIds', moodleIds);
 }
 
-mainProgram()
-    .catch(e => {
-      console.log('ohno: ' + e);
-    });
+storage.initSync({dir: 'persistence/'});
+
+let errorArray = [];
+const mainPromise = mainProgram(errorArray);
+mainPromise.catch(e => {
+  console.log('Problem: ' + e);
+  if (errorArray.length > 0) {
+    console.log('Errors to Report:');
+    errorArray.forEach(e => console.log(' - ' + e));
+  }
+});
+mainPromise.then(() => {
+  if (errorArray.length > 0) {
+    console.log('Errors to Report:');
+    errorArray.forEach(e => console.log(' - ' + e));
+  }
+});
 
 function fakeSFQuery() {
   return JSON.parse(`[
@@ -205,4 +222,11 @@ function fakeMoodleQuery() {
       `[{"userid":***REMOVED***,"timecompleted":1508501109,"idnumber":"***REMOVED***"},
       {"userid":***REMOVED***,"timecompleted":1512731344,"idnumber":"***REMOVED***"}]`);
 
+}
+
+async function getMoodleCourseCompletion(mHost, mToken, moodleId, lastReadEpoch) {
+  if (staging) {
+    return fakeMoodleQuery();
+  }
+  return JSON.parse(`[]`);
 }
