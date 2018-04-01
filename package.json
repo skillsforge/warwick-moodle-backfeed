@@ -4,9 +4,10 @@
   "description": "Integration between SkillsForge and Moodle",
   "main": "src/index.js",
   "scripts": {
+    "start": "node src/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "Alex Williams <***REMOVED***> (***REMOVED***)",
+  "author": "Alex Williams <alex.williams@skillsforge.co.uk> (***REMOVED***)",
   "license": "ISC",
   "dependencies": {
     "node-fetch": "^2.1.1",
