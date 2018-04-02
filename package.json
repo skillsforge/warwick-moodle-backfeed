@@ -2,6 +2,10 @@
   "name": "skillsforge-warwick-moodle-backfeed",
   "version": "1.0.0",
   "description": "Integration between SkillsForge and Moodle",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/skillsforge/warwick-moodle-backfeed.git"
+  },
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
