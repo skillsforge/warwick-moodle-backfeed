@@ -121,15 +121,17 @@ mainProgram(errorArray, emailDetails)
       console.error('Fatal Issue:', e);
     })
     .then(() => {
-      if (errorArray.length > 0) {
-        console.log('== Errors to Report ==');
-        errorArray.forEach(e => console.log(' - ' + e));
-      }
-
       if (typeof emailDetails.fromConfig === 'undefined'
           || typeof emailDetails.fromConfig.pmToken === 'undefined') {
         console.error('\n! No email details configured - please add these to the config.');
-      } else {
+
+      } else if (errorArray.length > 0) {
+
+        // Print to the console
+        console.log('== Errors to Report ==');
+        errorArray.forEach(e => console.log(' - ' + e));
+
+        // Send as an email
         const errorListString = errorArray.reduce((listSoFar, currentValue) => {
           return listSoFar + '\n - ' + currentValue;
         }, 'The following issues were found with the SkillsForge Moodle Integration:').trim();
