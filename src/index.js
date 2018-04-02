@@ -1,146 +1,153 @@
 const config = require('./config.js');
 const SfEm = require('./sf-em.js');
 const Moodle = require('./moodle.js');
+const postmark = require('postmark');
+
+const epochNow = function() {
+  return Math.floor(Date.now() / 1000);
+};
 
 const formatSession = function(session) {
   return `Session ${session.sessionNumber} (${session.id.substring(0, 8)}) ` +
          `for event "${session.eventCode}" / "${session.title}"`;
 };
 
-const findMoodleDetails = function(sessions, moodleIds, errors) {
+const findMoodleDetails = function(sessions, queryHistory, errors) {
   const getMoodleId = function(adminNotes) {
     if (typeof adminNotes !== 'string') { return undefined; }
     if (!adminNotes.match(/^moodle_id = .*$/)) { return undefined; }
     return adminNotes.replace('moodle_id = ', '');
   };
+
   return sessions.map(session => {
     const moodleId = getMoodleId(session.adminNotes);
     if (typeof moodleId === 'undefined') {
       errors.push(`${formatSession(session)} has a malformed Moodle ID.`);
+      console.error(` ! ${formatSession(session)} has a malformed Moodle ID.`);
       return {session, moodleId: null, lastRead: null, lastReadEpoch: null};
     } else {
-      if (!moodleIds.hasOwnProperty(session.id)) {
-        moodleIds[session.id] = {lastQuery: 0};
+      if (!queryHistory.hasOwnProperty(session.id)) {
+        queryHistory[session.id] = {lastQuery: 0};
       }
-      const lastReadEpoch = moodleIds[session.id].lastQuery;
+      const lastReadEpoch = queryHistory[session.id].lastQuery;
       const lastRead = new Date(lastReadEpoch * 1000);
-      console.log(
-          ` - ${formatSession(session)} ` +
-          `(with Moodle ID "${moodleId}"), last read on ${lastRead} (${lastReadEpoch})`);
+      const lastReadString = lastReadEpoch === 0 ? 'previously unseen.'
+                                                 : `last read on ${lastRead} [${lastReadEpoch}]`;
+      console.info(` - ${formatSession(session)} (with Moodle ID "${moodleId}") ` + lastReadString);
       return {session, moodleId, lastRead, lastReadEpoch};
     }
   });
 };
 
-const getMoodleCompletions = async function(sessionsWithMoodleIdsAndLastRead, errors, moodle) {
+const getMoodleCompletions = async function(sessionWithMoodleInfo, errors, moodle) {
   const completions = [];
-  for (let index = 0; index < sessionsWithMoodleIdsAndLastRead.length; index++) {
-    const obj = sessionsWithMoodleIdsAndLastRead[index];
+  for (let index = 0; index < sessionWithMoodleInfo.length; index++) {
+    const obj = sessionWithMoodleInfo[index];
     if (obj.moodleId === null) {
       continue;
     }
     console.info(` - ${obj.moodleId}, for any changes since ${obj.lastRead}`);
     try {
-      const users = await  moodle.getCourseCompletion(obj.moodleId, obj.lastReadEpoch);
-      completions.push({sfData: obj, users: users});
-      console.info(`   - ${users.length} user(s)`);
+      const users = await moodle.getCourseCompletion(obj.moodleId, obj.lastReadEpoch);
+      const idNumbers = users.map(user => user.idnumber.toLowerCase().trim());
+      console.info(`   - ${users.length} user(s): ${idNumbers}`);
+      completions.push({sfData: obj, users: idNumbers});
     } catch (e) {
-      errors.push(`Session ${obj.session.sessionNumber} for event ${obj.session.eventCode} ` +
-                  `(${obj.session.title}, Moodle ID ${obj.moodleId}) could not be retrieved from ` +
-                  `moodle: ` + e);
+      errors.push(`${formatSession(obj.session)} (with Moodle ID "${obj.moodleId}") could not be ` +
+                  `retrieved from moodle: ` + e);
     }
   }
-  return Promise.resolve(completions);
+  return completions;
 };
 
-async function mainProgram(errors) {
-  const v = {};
-  let abort = false;
+async function mainProgram(errors, emailDetails) {
 
-  try {
-    v.cfg = await config.getConfig();
+  // Fetch configuration from storage, and set up helper objects.
+  const cfg = await config.getConfig();
+  const sfEm = new SfEm(cfg.sfHost, cfg.sfToken, config.fakeSfApiCalls);
+  const moodle = new Moodle(cfg.mHost, cfg.mToken, config.fakeMoodleApiCalls);
+  const storedQueryHistory = await config.getQueryHistory();
+  const queryHistory = (typeof storedQueryHistory === 'undefined') ? {} : storedQueryHistory;
+  emailDetails.fromConfig = cfg.email;
 
-    v.sfEm = new SfEm(v.cfg.sfHost, v.cfg.sfToken, config.fakeSfApiCalls);
-    v.moodle = new Moodle(v.cfg.mHost, v.cfg.mToken, config.fakeMoodleApiCalls);
+  // Locate all sessions in SkillsForge which have unprocessed attendance.
+  console.info('Locating all unprocessed Moodle sessions from SkillsForge...');
+  const sessions = await sfEm.getUnprocessedSessions();
+  console.info(`Found ${sessions.length} session(s):`);
 
-    const moodleIdsFromConfig = await config.getMoodleLastCheckTimes();
-    v.moodleIds = (typeof moodleIdsFromConfig === 'undefined') ? {} : moodleIdsFromConfig;
-  } catch (e) {
-    errors.push('Could not start: ' + e);
-    abort = e;
-  }
-  if (abort !== false) {
-    throw abort;
-  }
+  // Find the moodle ID from within the admin notes, and lookup the last query time for that course.
+  const sessionsWithMoodleInfo = findMoodleDetails(sessions, queryHistory, errors);
 
-  console.info('Fetching all unprocessed Moodle sessions from SkillsForge...');
-  try {
-    v.sessions = await v.sfEm.getUnprocessedSessions();
-  } catch (e) {
-    errors.push(e.toString());
-  }
+  // Find all the users which completed each course since the last query.
+  console.info(`\nLocating completion events in Moodle...`);
+  const completions = await getMoodleCompletions(sessionsWithMoodleInfo, errors, moodle);
 
-  console.log(`Found ${v.sessions.length} session(s):`);
-  const sessionsWithMoodleInfo = findMoodleDetails(v.sessions, v.moodleIds, errors);
-
-  console.info(`Fetching user completion times from Moodle...`);
-  try {
-    v.completions = await getMoodleCompletions(sessionsWithMoodleInfo, errors, v.moodle);
-  } catch (e) {
-    errors.push('Could not fetch moodle completion statuses.');
-    abort = e;
-  }
-  if (abort !== false) {
-    throw abort;
-  }
-
-  v.sessionUsers = {};
-  for (let index = 0; index < v.completions.length; index++) {
-    const su = v.completions[index];
-    if (su.users.length === 0) {
-      // Only set last query date when ALL fetches are successful - if there are no users, there is
-      // no further need for fetches, and so this is complete.
-      v.moodleIds[su.sfData.session.id].lastQuery = Math.floor(Date.now() / 1000);
+  // Calculate which sessions need their registrations updating.
+  const sessionUsersMap = {};
+  for (let i = 0; i < completions.length; i++) {
+    const moodleCourse = completions[i];
+    if (moodleCourse.users.length === 0) {
+      queryHistory[moodleCourse.sfData.session.id].lastQuery = epochNow();
       continue;
     }
-    v.sessionUsers[su.sfData.session.id] = su.users.map(user => user.idnumber.toLowerCase());
+    sessionUsersMap[moodleCourse.sfData.session.id] = moodleCourse.users;
   }
 
-  console.log('Submitting new attendance records to SkillsForge...');
-  console.debug(v.sessionUsers);
-  const numUpdated = await v.sfEm.updateAttendance(v.sessionUsers).catch(reason => {
-    console.log('Caught');
-    errors.push('Could not submit new attendance records: ' + reason);
-    abort = reason;
-  });
-  if (abort !== false) {
-    throw abort;
-  }
-  console.log(`Updated ${numUpdated} registration(s).`);
+  // If any users have completed courses, then update SkillsForge accordingly.
+  if (Object.keys(sessionUsersMap).length > 0) {
+    console.log('\nSubmitting new attendance records to SkillsForge...');
+    const numUpdated = await sfEm.updateAttendance(sessionUsersMap);
+    console.log(` - Updated ${numUpdated} registration(s).`);
 
-  for (const sessionId in v.sessionUsers) {
-    if (!v.sessionUsers.hasOwnProperty(sessionId)) {continue;}
-    v.moodleIds[sessionId].lastQuery = Math.floor(Date.now() / 1000);
+    for (const sessionId in sessionUsersMap) {
+      if (!sessionUsersMap.hasOwnProperty(sessionId)) {continue;}
+      queryHistory[sessionId].lastQuery = epochNow();
+    }
+  } else {
+    console.log('\nNo users have completed any courses since the last check (or all sessions' +
+                ' encountered Moodle API errors.)');
   }
-  try {
-    await config.putMoodleLastCheckTimes(v.moodleIds);
-  } catch (e) {
-    errors.push('Could not save last-checked timestamps: ' + e);
-  }
+
+  // Store the last check times for each Moodle course.
+  await config.putMoodleLastCheckTimes(queryHistory);
+
+  console.info('\nCompleted.\n');
 }
 
 let errorArray = [];
-const mainPromise = mainProgram(errorArray);
-mainPromise.catch(e => {
-  console.log('Problem: ' + e);
-  if (errorArray.length > 0) {
-    console.log('Errors to Report:');
-    errorArray.forEach(e => console.log(' - ' + e));
-  }
-});
-mainPromise.then(() => {
-  if (errorArray.length > 0) {
-    console.log('Errors to Report:');
-    errorArray.forEach(e => console.log(' - ' + e));
-  }
-});
+let emailDetails = {};
+mainProgram(errorArray, emailDetails)
+    .catch(e => {
+      console.error('Fatal Issue:', e);
+    })
+    .then(() => {
+      if (errorArray.length > 0) {
+        console.log('== Errors to Report ==');
+        errorArray.forEach(e => console.log(' - ' + e));
+      }
+
+      if (typeof emailDetails.fromConfig === 'undefined') {
+        console.error('\n! No email details configured - please add these to the config.');
+      } else {
+        const errorListString = errorArray.reduce((listSoFar, currentValue) => {
+          return listSoFar + '\n - ' + currentValue;
+        }, 'The following issues were found with the SkillsForge Moodle Integration:').trim();
+
+        const pmClient = new postmark.Client(emailDetails.fromConfig.pmToken);
+        pmClient.sendEmail(
+            {
+              'From': emailDetails.fromConfig.sender,
+              'To': emailDetails.fromConfig.recipients.toString(),
+              'Subject': 'Problem(s) found by Moodle<->SkillsForge integration',
+              'TextBody': errorListString
+            },
+            function(error, response) {
+              if (error) {
+                console.error('! Could not deliver email: ' + error);
+              } else {
+                console.info(' >>> Email delivered');
+              }
+            });
+
+      }
+    });

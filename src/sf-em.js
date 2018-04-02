@@ -10,46 +10,47 @@ module.exports = class SfEm {
     this.useFakeCalls = useFakeCalls;
   }
 
-  getUnprocessedSessions() {
+  async getUnprocessedSessions() {
     if (this.useFakeCalls) {
-      return Promise.resolve(fakeUnprocessedSessionsResult());
+      return fakeUnprocessedSessionsResult();
     }
-    return fetch(`https://${this.host}${unprocessedSessionsPath}`,
-                 {method: 'GET', headers: {'X-Auth-Token': this.token}})
-        .then(data => {
-          if (data.status !== 200) {
-            return Promise.reject(`Problem querying SF API: ${data.statusText}`);
-          }
-          return data.json();
-        })
-        .then(json => {
-          if (json['success'] !== true) {
-            return Promise.reject(`SF API error: ${json.errorMessage}`);
-          }
-          return json['data'];
-        });
+    const data = await fetch(`https://${this.host}${unprocessedSessionsPath}`,
+                             {method: 'GET', headers: {'X-Auth-Token': this.token}});
+    if (data.status !== 200) {
+      throw new Error(`Problem querying SF API: ${data.statusText}`);
+    }
+
+    const json = await data.json();
+    if (json['success'] !== true) {
+      throw new Error(`SF API error: ${json.errorMessage}`);
+    }
+    return json['data'];
   };
 
-  updateAttendance(sessionUsersMap) {
+  async updateAttendance(sessionUsersMap) {
     if (this.useFakeCalls) {
       return Promise.resolve(fakeUpdateAttendanceResult());
     }
-    return fetch(`https://${this.host}/${updateAttendancePath}`,
-                 {
-                   headers: {'X-Auth-Token': this.token, 'Content-Type': 'application/json'},
-                   method: 'POST',
-                   body: {newAttendanceType: 'ATTENDED', usersOfSessions: sessionUsersMap}
-                 })
-        .then(data => {
-          if (data.status !== 200) {
-            throw new Error(`Could not submit attendance update: ${data.statusText}`);
-          }
-          const json = data.json();
-          if (json.success !== true) {
-            throw new Error(`SkillsForge API Error: ${json.errorMessage}`);
-          }
-          return json['data'];
-        });
+    const data = await fetch(`https://${this.host}/${updateAttendancePath}`,
+                             {
+                               headers: {
+                                 'X-Auth-Token': this.token,
+                                 'Content-Type': 'application/json'
+                               },
+                               method: 'POST',
+                               body: {
+                                 newAttendanceType: 'ATTENDED',
+                                 usersOfSessions: sessionUsersMap
+                               }
+                             });
+    if (data.status !== 200) {
+      throw new Error(`Could not submit attendance update: ${data.statusText}`);
+    }
+    const json = data.json();
+    if (json.success !== true) {
+      throw new Error(`SkillsForge API Error: ${json.errorMessage}`);
+    }
+    return json['data'];
   }
 };
 

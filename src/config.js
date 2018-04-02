@@ -1,28 +1,19 @@
 const storage = require('node-persist');
 const readLine = require('readline');
 
-exports.fakeMoodleApiCalls = true;
-exports.fakeSfApiCalls = true;
+exports.fakeMoodleApiCalls = false;
+exports.fakeSfApiCalls = false;
 
-//const mTokDef = '***REMOVED***';
 const pmSenderDef = 'infrastructure@skillsforge.co.uk';
 const sfHostDef = 'warwick.dev.skillsforge.co.uk/warwick';
 const mHostDef = 'moodle-staging.warwick.ac.uk';
-const mPath = '/webservice/rest/server.php' +
-              '?wstoken=%TOKEN%' +
-              '&wsfunction=warwick_timestamp_get_course_completion_status' +
-              '&moodlewsresformat=json' +
-              '&courseidnumber=%MOODLEID%' +
-              '&timestamp=%TIMESTAMP%';
 
-/** @typedef {{lastQuery:number}} MoodleStorage */
-/** @returns {{MoodleStorage}} */
-exports.getMoodleLastCheckTimes = function() {
-  return storage.getItem('moodleIds');
+exports.getQueryHistory = function() {
+  return storage.getItem('queryHistory');
 };
 
-exports.putMoodleLastCheckTimes = function(moodleIds) {
-  return storage.setItem('moodleIds', moodleIds);
+exports.putMoodleLastCheckTimes = function(queryHistory) {
+  return storage.setItem('queryHistory', queryHistory);
 };
 
 exports.getConfig = async function() {
@@ -33,6 +24,7 @@ exports.getConfig = async function() {
     return configFromStorage;
   }
 
+  // todo: check error throwing works correctly from this point forward
   const getAnswer = function(question, defaultAnswer) {
     return new Promise(resolve => {
       rl.question(question, answer => resolve(answer === '' ? defaultAnswer : answer));
@@ -44,8 +36,8 @@ exports.getConfig = async function() {
   const mHost = await getAnswer(`Enter Moodle host name [${mHostDef}]: `, mHostDef);
   const sfToken = await getAnswer(`Enter SkillsForge API token: `);
   const mToken = await getAnswer(`Enter Moodle API token: `);
-  const recipientsCsv = await getAnswer(`Enter (comma-separated) list of email recipients: []`);
-  const sender = await getAnswer(`Enter Postmark sender address: [${pmSenderDef}]`, pmSenderDef);
+  const recipientsCsv = await getAnswer(`Enter (comma-separated) list of email recipients []:`);
+  const sender = await getAnswer(`Enter Postmark sender address [${pmSenderDef}]:`, pmSenderDef);
   const pmToken = await getAnswer(`Enter Postmark API token: `);
   rl.close();
 
