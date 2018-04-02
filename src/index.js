@@ -126,7 +126,8 @@ mainProgram(errorArray, emailDetails)
         errorArray.forEach(e => console.log(' - ' + e));
       }
 
-      if (typeof emailDetails.fromConfig === 'undefined') {
+      if (typeof emailDetails.fromConfig === 'undefined'
+          || typeof emailDetails.fromConfig.pmToken === 'undefined') {
         console.error('\n! No email details configured - please add these to the config.');
       } else {
         const errorListString = errorArray.reduce((listSoFar, currentValue) => {
@@ -150,4 +151,7 @@ mainProgram(errorArray, emailDetails)
             });
 
       }
+    })
+    .catch(reason => {
+      console.error(`! Could not send email: ${reason}`);
     });

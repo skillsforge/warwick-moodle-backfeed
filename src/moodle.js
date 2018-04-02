@@ -44,7 +44,7 @@ module.exports = class Moodle {
 
 function fakeMoodleQuery() {
   return JSON.parse(
-      `[{"userid":***REMOVED***,"timecompleted":1508501109,"idnumber":"***REMOVED***"},
-      {"userid":***REMOVED***,"timecompleted":1512731344,"idnumber":"***REMOVED***"}]`);
+      `[{"userid":1234,"timecompleted":1508501109,"idnumber":"***REMOVED***"},
+      {"userid":5678,"timecompleted":1512731344,"idnumber":"***REMOVED***"}]`);
 
 }
