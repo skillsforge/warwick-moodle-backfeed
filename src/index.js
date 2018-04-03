@@ -55,6 +55,7 @@ const getMoodleCompletions = async function(sessionWithMoodleInfo, errors, moodl
     } catch (e) {
       errors.push(`${formatSession(obj.session)} (with Moodle ID "${obj.moodleId}") could not be ` +
                   `retrieved from moodle: ` + e);
+      console.error(`   ! ` + e);
     }
   }
   return completions;
