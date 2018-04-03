@@ -1,7 +1,7 @@
 const fetch = require('node-fetch');
 
-const unprocessedSessionsPath = '/warwick/api/eventManager/unprocessedSessions/Online%20Moodle%20Course';
-const updateAttendancePath = '/warwick/api/eventManager/updateAttendance';
+const unprocessedSessionsPath = '/api/eventManager/unprocessedSessions/Online%20Moodle%20Course';
+const updateAttendancePath = '/api/eventManager/updateAttendance';
 
 module.exports = class SfEm {
   constructor(sfHost, sfToken, useFakeCalls = false) {

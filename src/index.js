@@ -65,7 +65,7 @@ async function mainProgram(errors, emailDetails) {
   // Fetch configuration from storage, and set up helper objects.
   const cfg = await config.getConfig();
   const sfEm = new SfEm(cfg.sfHost, cfg.sfToken, config.fakeSfApiCalls);
-  const moodle = new Moodle(cfg.mHost, cfg.mToken, config.fakeMoodleApiCalls);
+  const moodle = new Moodle(cfg.mHost, cfg.mToken, cfg.mFunction, config.fakeMoodleApiCalls);
   const storedQueryHistory = await config.getQueryHistory();
   const queryHistory = (typeof storedQueryHistory === 'undefined') ? {} : storedQueryHistory;
   emailDetails.fromConfig = cfg.email;

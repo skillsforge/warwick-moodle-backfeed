@@ -2,16 +2,17 @@ const fetch = require('node-fetch');
 
 const courseCompletionPath = '/webservice/rest/server.php' +
                              '?wstoken=%TOKEN%' +
-                             '&wsfunction=warwick_timestamp_get_course_completion_status' +
+                             '&wsfunction=%FUNCTION%' +
                              '&moodlewsrestformat=json' + // Note, "jsonArray" here returns XML!
                              '&courseidnumber=%MOODLEID%' +
                              '&timestamp=%TIMESTAMP%';
 
 module.exports = class Moodle {
-  constructor(mHost, mToken, useFakeCalls = false) {
+  constructor(mHost, mToken, completionFunctionName, useFakeCalls = false) {
     this.host = mHost;
     this.token = mToken;
     this.useFakeCalls = useFakeCalls;
+    this.completionFunctionName = completionFunctionName;
   }
 
   async getCourseCompletion(moodleId, lastReadEpoch) {
@@ -22,6 +23,7 @@ module.exports = class Moodle {
     const path = courseCompletionPath
         .replace('%TOKEN%', this.token)
         .replace('%MOODLEID%', moodleId)
+        .replace('%FUNCTION%', this.completionFunctionName)
         .replace('%TIMESTAMP%', lastReadEpoch);
 
     const data = await fetch(`https://${this.host}${path}`, {method: 'GET'});
