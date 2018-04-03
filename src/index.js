@@ -16,7 +16,7 @@ const findMoodleDetails = function(sessions, queryHistory, errors) {
   const getMoodleId = function(adminNotes) {
     if (typeof adminNotes !== 'string') { return undefined; }
     if (!adminNotes.match(/^moodle_id = .*$/)) { return undefined; }
-    return adminNotes.replace('moodle_id = ', '');
+    return adminNotes.replace('moodle_id = ', '').trim();
   };
 
   return sessions.map(session => {

@@ -8,6 +8,7 @@ module.exports = class SfEm {
     this.host = sfHost;
     this.token = sfToken;
     this.useFakeCalls = useFakeCalls;
+    this.doUpdate = true;
   }
 
   async getUnprocessedSessions() {
@@ -28,25 +29,33 @@ module.exports = class SfEm {
   };
 
   async updateAttendance(sessionUsersMap) {
+    if (!this.doUpdate) {
+      throw new Error('Aborting before update, as requested.');
+    }
     if (this.useFakeCalls) {
       return Promise.resolve(fakeUpdateAttendanceResult());
     }
-    const data = await fetch(`https://${this.host}/${updateAttendancePath}`,
-                             {
-                               headers: {
-                                 'X-Auth-Token': this.token,
-                                 'Content-Type': 'application/json'
-                               },
-                               method: 'POST',
-                               body: {
-                                 newAttendanceType: 'ATTENDED',
-                                 usersOfSessions: sessionUsersMap
-                               }
-                             });
+
+    console.info(sessionUsersMap);
+
+    const data = await fetch(
+        `https://${this.host}${updateAttendancePath}`,
+        {
+          headers: {
+            'X-Auth-Token': this.token,
+            'Content-Type': 'application/json;charset=UTF-8'
+          },
+          method: 'POST',
+          body: JSON.stringify(
+              {
+                newAttendanceType: 'ATTENDED',
+                usersOfSessions: sessionUsersMap
+              })
+        });
     if (data.status !== 200) {
       throw new Error(`Could not submit attendance update: ${data.statusText}`);
     }
-    const json = data.json();
+    const json = await data.json();
     if (json.success !== true) {
       throw new Error(`SkillsForge API Error: ${json.errorMessage}`);
     }

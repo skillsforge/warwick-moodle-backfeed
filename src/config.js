@@ -37,8 +37,8 @@ exports.getConfig = async function() {
   const sfToken = await getAnswer(`Enter SkillsForge API token: `);
   const mToken = await getAnswer(`Enter Moodle API token: `);
   const mFunction = await getAnswer(`Enter Moodle WS Function Name: `);
-  const recipientsCsv = await getAnswer(`Enter (comma-separated) list of email recipients []:`, '');
-  const sender = await getAnswer(`Enter Postmark sender address [${pmSenderDef}]:`, pmSenderDef);
+  const recipientsCsv = await getAnswer(`Enter comma-separated list of email recipients []: `, '');
+  const sender = await getAnswer(`Enter Postmark sender address [${pmSenderDef}]: `, pmSenderDef);
   const pmToken = await getAnswer(`Enter Postmark API token: `);
   rl.close();
 
